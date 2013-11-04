@@ -9,5 +9,6 @@ Description: This tutorial illustrates how files obtained from the
     Bioconductor data structures, and how data can be handled to
     arrive at results comparable to those in CGB tutorials.
 License: Artistic-2.0
-Suggests: BiocStyle, knitr, rjson, Biobase, survival, RColorBrewer
+Suggests: BiocStyle, knitr, rjson, Biobase, survival, RColorBrewer,
+    GenomicRanges
 VignetteBuilder: knitr

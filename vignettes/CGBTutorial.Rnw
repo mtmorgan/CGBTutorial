@@ -7,6 +7,8 @@ figwd <- getwd()
 suppressPackageStartupMessages({
     library(rjson)
     library(Biobase)
+    library(GenomicRanges)
+    library(ggbio)
     library(survival)
     library(RColorBrewer)
     library(CGBTutorial)
@@ -17,13 +19,9 @@ BiocStyle::latex()
 library(knitr)
 dir.create(wd <- tempfile())
 setwd(wd)
-stopifnot(file.copy(system.file(package="CGBTutorial", "bigdata",
-    "TCGA_BRCA_G4502A_07_3-2013-10-29.tgz"), wd))
-opts_knit$set(root.dir=wd)
-opts_chunk$set(tidy=FALSE)
 @ 
 
-\title{Tutorial: Cancer Genomics Browser data in \R{} /
+\title{Tutorial: Cancer Genomics Browser Data in \R{} /
   \Bioconductor{}}
 \author{Martin Morgan \email{mtmorgan@fhcrc.org}}
 \date{4 November, 2013}
@@ -31,8 +29,16 @@ opts_chunk$set(tidy=FALSE)
 \begin{document}
 
 \maketitle
+\tableofcontents
 
 \section{PAM50}
+
+<<setup-pam50, echo=FALSE, cache=FALSE>>=
+stopifnot(file.copy(system.file(package="CGBTutorial", "bigdata",
+    "TCGA_BRCA_G4502A_07_3-2013-10-29.tgz"), wd))
+opts_knit$set(root.dir=wd)
+opts_chunk$set(tidy=FALSE)
+@ 
 
 We start with the material covered in the basic course, PAM50
 Subtypes\footnote{\url{https://genome-cancer.ucsc.edu/proj/site/demo/\#2}}.
@@ -291,10 +297,9 @@ library(RColorBrewer)
 pal_rows <- brewer.pal(length(levels(lvls)), "Dark2")
 pal_heatmap <- rev(brewer.pal(11, "RdBu"))
 pdf(file.path(figwd, "pam50heatmap.pdf"))
-heatmap(t(exprs(pam50)[,o_samples]), col=pal_heatmap, 
-    Rowv=NA, Colv=NA, scale="column", 
-    RowSideColors=pal_rows[lvls[o_samples]], labRow=character(),
-    margin=c(5, 10))
+heatmap(t(exprs(pam50)[,o_samples]), col=pal_heatmap, Rowv=NA, Colv=NA, 
+    scale="column", margin=c(5, 10), labRow=character(),
+    RowSideColors=pal_rows[lvls[o_samples]])
 legend("topright", legend=levels(lvls), fill=pal_rows, cex=.9, box.lty=0)
 invisible(dev.off())
 @ 
@@ -306,6 +311,9 @@ invisible(dev.off())
     genes in the PAM subset. Genes are hierarchically clustered;
     samples are grouped by stratum.}
 \end{figure}
+\noindent An \emph{advanced exercise} is to use the \CRANpkg{pamr}
+package to arrive, from first principles, at a gene set to be used in
+classifying cancers.
 
 Kaplan-Meier curves are fit using the \CRANpkg{survival} package from
 CRAN. This analysis involves purely phenotypic data, the
@@ -371,6 +379,176 @@ invisible(dev.off())
   \caption{Kaplan-Meier survivorship curves for the AgilentG4502A
     subset of TCGA BRCA data}
 \end{figure}
+
+\section{Working with other data types}
+
+\subsection{Containers for TCGA data types}
+
+The process when working with other data types is similar: download
+and extract the archive, input the sample and experimental data,
+create a data structure that coordinates inforamtion, and perform
+analysis. Table~\ref{tab:containers} suggests containers that
+integrate sample and experiment information appropriate for different
+data types.
+\begin{table}
+  \centering
+  \begin{tabular}{lll}
+    Data type & Class & Packages \\\hline
+    Expression & \Rclass{Biobase::ExpressionSet} 
+    & \Biocpkg{limma} (microarrays); \Biocpkg{edgeR}, \Biocpkg{DESeq} (RNA-seq) \\
+    Copy number & \Rclass{GenomicRanges::GRanges} 
+    & \Biocpkg{DNAcopy} \\
+    Variants & \Rclass{VariantAnnotation::VCF} &
+    \Biocpkg{VariantAnnotation} \\
+    Methylation & \Rclass{GenomicRanges::SummarizedExperiment}
+    & \Biocpkg{minfi}\\
+    \hline
+  \end{tabular}
+  \caption{Containers to integrate sample and experiment information}
+  \label{tab:containers}
+\end{table}
+
+\subsection{Example: copy number}
+
+<<setup-snps, echo=FALSE, cache=FALSE>>=
+stopifnot(file.copy(system.file(package="CGBTutorial", "bigdata",
+    "TCGA_BRCA_GSNP6noCNV-2013-10-29.tgz"), wd))
+opts_knit$set(root.dir=wd)
+opts_chunk$set(tidy=FALSE)
+@ 
+
+Here are the steps in common with previous analysis:
+<<unpack-SNP, cache=FALSE>>=
+## extract
+untar("TCGA_BRCA_GSNP6noCNV-2013-10-29.tgz")
+setwd("TCGA_BRCA_GSNP6noCNV-2013-10-29")
+## md5 check
+checks <- read.delim("md5.txt", header=FALSE, sep="",
+    col.names=c("Sum", "File"), stringsAsFactors=FALSE)
+head(checks)
+stopifnot(all(md5sum(checks$File) == checks$Sum))
+## clinical data as before, though data is differentx...
+## experiment data JSON
+str(fromJSON(file="SNP6_nocnv_genomicSegment.json"))
+@ 
+\noindent The clinical data is the same, so no need to re-process.
+<<setwd-SNP, echo=FALSE, cache=FALSE>>=
+setwd("TCGA_BRCA_GSNP6noCNV-2013-10-29")
+opts_knit$set(root.dir=getwd())
+@ 
+
+The copy number experimental data requires distinct processing. Here
+are the first few lines of data
+<<SNP-head>>=
+readLines("SNP6_nocnv_genomicSegment", 3)
+@ 
+\noindent This is tab-delimited data. The first column is an
+identifier, the next columns represent the chromosome (`seqname' in
+\Bioconductor{} parlance), start, end, and strand (\texttt{.}
+indicates that strand is not relevant), and the final column is a
+score representing the direction and magnitude of the copy number
+change.
+<<SNP>>=
+snp <- read.delim("SNP6_nocnv_genomicSegment", header=FALSE, sep="\t",
+    stringsAsFactors=FALSE, 
+    col.names=c("id", "seqname", "start", "end", "strand", "score"))
+class(snp)
+dim(snp)
+head(snp)
+@ 
+\noindent \fixme{0-based or 1-based coordinates?}  Range-based data
+such as this is represented effectively in \Bioconductor{} as
+\Rclass{GRanges} objects from the \Biocpkg{GenomicRanges} package.
+<<SNP-GRanges>>=
+library(GenomicRanges)
+grsnp <- with(snp, {
+    strand <- sub(".", "*", strand)
+    GRanges(seqname, IRanges(start, end), strand, id=id, score=score)
+})
+head(grsnp, 3)
+@ 
+\noindent (The \Rcode{seqinfo} at the end of \Rclass{GRanges} object
+can be used to specify chromosome lengths, and when present is used as
+a very valuable sanity check when performing operations on different
+ranges).
+
+\subsection{Coverage and other range-based operations}
+
+\Rclass{GRanges} objects enable many very useful operations. For
+instance, one can summarize overall copy number across all samples with
+<<coverage>>=
+cvg <- coverage(grsnp, weight=grsnp$score) / length(unique(grsnp$id))
+names(cvg)
+cvg$chr1
+@ 
+\noindent The result is a list, one element for each chromosome, of
+\Rclass{Rle} (run-length encoding) objects. An \Rclass{Rle} is a
+compact way of storing genome scale data. The snippet above shows that
+there are \Sexpr{nrun(cvg[["chr1"]])} `runs', the first consists of
+\Sexpr{runLength(cvg[["chr1"]])[1]} nucleotides where over all samples
+the average copy number is unchanged from diploid,
+\Sexpr{runLength(cvg[["chr1"]])[2]} nucleotides where average copy
+number is \Sexpr{runValue(cvg[["chr1"]])[2]}
+
+\Rclass{GRanges} is used extensively in diverse \Bioconductor{}
+packages. For instance, the flexible \Biocpkg{ggbio} package provides
+plotting facilities following Wickham's popular \CRANpkg{ggbio2}
+paradigm, tailored to genomic data, e.g., Figure~\ref{fig:cvgplot}.
+<<ggbio-cvgplot>>=
+library(ggbio)
+pdf(file.path(figwd, "cvgplot.pdf"), width=8, height=5)
+suppressWarnings({
+    print(autoplot(cvg[paste0("chr", 1:5)], nbin=100))
+})
+invisible(dev.off())
+@ 
+\begin{figure}
+  \centering
+  \includegraphics[width=.8\textwidth]{cvgplot}
+  \caption{Average coverage from TCGA BRCA SNP6 arrays across all samples}
+  \label{fig:cvgplot}
+\end{figure}
+\noindent Another great visualization package is \Biocpkg{Gviz}, which
+emaphasizes elegant presentation of data analogous to tracks in a
+genome browser, but more elegantly and flexibly presented.
+
+It is straight-forward, using functions such as
+\Rfunction{findOverlaps} or \Rfunction{subsetByOverlaps}, to tally or
+select overlaps between regions, e.g., of average copy number
+elevation and enhanced gene expression.
+
+\section{Summary}
+
+\begin{enumerate}
+\item The CGB can be used to navigate download level III TCGA data
+  archives.
+\item TCGA data can be input into \R{} using standard commands, but it
+  pays to got the `extra mile' and create integrated data objects.
+\item Once in \R{}, there are diverse analysis and visualization
+  opportunities in base, CRAN, and \Bioconductor{} packages; the
+  \Biocpkg{GenomicRanges} package and allies is the starting point for
+  any range-based, genome scale data analysis task.
+\end{enumerate}
+
+
+\paragraph{\Bioconductor{} resources}
+
+There are a large number of \Bioconductor{} packages for microarray,
+sequence, flow cytometry, and other high-throughput genomic
+analyses. Check out the complete
+list\footnote{\url{http://bioconductor.org/packages/release/BiocViews.html}}
+or for particular `views' such as
+HighThroughputSequecing\footnote{\url{http://bioconductor.org/packages/release/BiocViews.html\#___HighThroughputSequencing}}. Each
+package has a `landing page' (e.g., for \Biocpkg{GenomicRanges}) that
+include links to vignettes (for overall orientation and use) and
+manuals (for documentation of individual functions). Material from
+previous
+courses\footnote{\url{http://bioconductor.org/help/course-materials/}}
+can provide valuable orientation. Short forthcoming courses are
+available through the Computation Biology shared resource; the next
+two-day course offered by the \Bioconductor{} group will be in
+February. There are very knowledgeable experts here at the Hutch, feel
+free to contact me if you'd like \R{} / \Bioconductor{} help.
 
 \bibliography{CGBTutorial}
 
