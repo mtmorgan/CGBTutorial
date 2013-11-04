@@ -1,0 +1,377 @@
+%\VignetteEngine{knitr::knitr}
+
+\documentclass{article}
+
+<<style, echo=FALSE, eval=TRUE, results="asis">>=
+figwd <- getwd()
+suppressPackageStartupMessages({
+    library(rjson)
+    library(Biobase)
+    library(survival)
+    library(RColorBrewer)
+    library(CGBTutorial)
+})
+BiocStyle::latex()
+@ 
+<<setup, echo=FALSE, cache=FALSE>>=
+library(knitr)
+dir.create(wd <- tempfile())
+setwd(wd)
+stopifnot(file.copy(system.file(package="CGBTutorial", "bigdata",
+    "TCGA_BRCA_G4502A_07_3-2013-10-29.tgz"), wd))
+opts_knit$set(root.dir=wd)
+opts_chunk$set(tidy=FALSE)
+@ 
+
+\title{Tutorial: Cancer Genomics Browser data in \R{} /
+  \Bioconductor{}}
+\author{Martin Morgan \email{mtmorgan@fhcrc.org}}
+\date{4 November, 2013}
+
+\begin{document}
+
+\maketitle
+
+\section{PAM50}
+
+We start with the material covered in the basic course, PAM50
+Subtypes\footnote{\url{https://genome-cancer.ucsc.edu/proj/site/demo/\#2}}.
+
+\subsection{Data retrieval \& extraction}
+Retrieve the data. Unfortunately, there are no programmatic ways to
+retrieved the data from the CGB (see the \software{Synapse} \R{}
+client\footnote{\url{https://www.synapse.org/\#!Synapse:syn1834618}}
+for one alternative; the data from Synapse is formatted differently
+from the CGB, so the following is not applicable).
+  
+Click on the \texttt{datasets} button, open the TCGA Breast invasive
+carcinoma data, and select the \texttt{AgilentG4502\_07\_3} data
+set. Download it by clicking on the button to the right of the
+selection.
+  
+Unpack the downloaded data, from the command line
+\begin{verbatim}
+tar xzf TCGA_BRCA_G4502A_07_3-2013-10-29.tgz
+\end{verbatim}
+  or from within \R{}
+<<unpack, cache=FALSE>>=
+untar("TCGA_BRCA_G4502A_07_3-2013-10-29.tgz")
+@   
+\noindent Switch to the directory containing the extracted files, and
+take a look at the directory content
+<<content, cache=FALSE>>=
+setwd("TCGA_BRCA_G4502A_07_3-2013-10-29")
+dir()
+@ 
+<<setwd-dataset, echo=FALSE, cache=FALSE>>=
+setwd("TCGA_BRCA_G4502A_07_3-2013-10-29")
+opts_knit$set(root.dir=getwd())
+@ 
+\noindent The files are as follows:
+\begin{description}
+\item[AgilentG4502A\_07\_3] Gene $\times$ sample normalized microarray
+  expression values. HUGO gene symbols used as identifiers.
+\item[BRCA\_clinicalMatrix] Sample $\times$ clinical feature matrix
+\item[BRCA\_clinicalFeature] Description of clinical features.
+\item[collapsed\_hugo\_symbols\_aliases\_only\_hg18.probeMap] HUGO gene
+  symbol start and end coordinates (0-based, hg18)
+\item[sampleMap]
+\item[*.json] Descriptions of the corresponding file.
+\item[md5.txt] A file of `check-sums' to validate that the data have
+  been downloaded without corruption.
+\end{description}
+
+As a basic `best practices', ensure that the checksums in
+\file{md5.txt} match those of the data. The file does not have a
+header identifying columns \Rcode{header=FALSE}, is white-space
+delimited \Rcode{sep=""}, and contains text columns to be interpretted
+as character vectors rather than factors
+\Rcode{stringsAsFactors=FALSE}
+<<md5>>=
+library(tools)
+checks <- read.delim("md5.txt", header=FALSE, sep="",
+    col.names=c("Sum", "File"), stringsAsFactors=FALSE)
+head(checks)
+stopifnot(all(md5sum(checks$File) == checks$Sum))
+@ 
+
+\subsection{Samples}
+
+Discover information about a file by parsing the corresponding
+JSON. For instance, the \file{BRCA\_clinicalMatrix} file has the
+following metadata:
+<<json>>=
+library(rjson)
+str(fromJSON(file="BRCA_clinicalMatrix.json"))
+@ 
+
+The \file{BRCA\_clinicalMatrix} file can be input into \R, after a
+little exploring, with the following. We use \Rcode{row.names=1} to
+use the first column (`sampleID') as the row names of the input
+object, and translate empty entries in \Rcode{character} columns as
+\Rcode{NA}.
+<<clinicalMatrix>>=
+clinical <- read.delim("BRCA_clinicalMatrix", header=TRUE, sep="\t",
+     row.names=1, na.strings="", stringsAsFactors=FALSE)
+class(clinical)
+dim(clinical)
+clinical[1:5, 1:5]
+table(sapply(clinical, class))
+@ 
+\noindent A more thorough input would carefully map the input columns
+to their corresponding data types (especially distinguishing between
+\Rclass{character} and \Rclass{factor}) using the \Rcode{colClasses}
+argument.
+
+The columns of the clinical matrix are described in the
+\file{BRCA\_clinicalFeature} file. There are no headers in the file
+<<clinicalFeature>>=
+str(fromJSON(file="BRCA_clinicalFeature.json"))
+features <- read.delim("BRCA_clinicalFeature", header=FALSE, sep="\t",
+    col.names=c("Feature", "Key", "Value"), stringsAsFactors=FALSE, )
+class(features)
+dim(features)
+features[1:5,]
+@ 
+\noindent Most but not all columns of the clinical matrix are
+described in the features file; these columns start with \texttt{X\_},
+but I'm not sure about why they are not documented.
+<<matrix-feature-descr>>=
+contained <- names(clinical) %in% features$Feature
+table(contained)
+head(names(clinical)[!contained], 5)
+@ 
+\noindent The first column in \Rcode{clinical} is
+\texttt{AJCC\_Stage\_nature2012}
+<<clinical-column-1>>=
+table(clinical[,1], useNA="always")
+@ 
+\noindent (Looking at the data, we see that this column should have
+been imported as a factor; more on this later). The metadata available
+about this column includes
+<<clinical-column-1-metadata>>=
+c1features <- features[features$Feature == names(clinical)[1],]
+dim(c1features)
+c1features$Key
+c1features[c(1:3, 17:18),]
+strsplit(c1features[16, "Value"], ",")
+@ 
+
+As an \textbf{advanced exercise}, implement the following function to
+coerce input columns from \file{BRCA\_clinicalMatrix} to the \R{}
+types implied by \file{BRCA\_clinicalFeature}.
+<<clinicalImport>>=
+importAsFactors <- 
+    function(data, features)
+{
+    ## identify data columns with state and stateOrder entries
+    ## create factor levels from features
+    ## - match 'state' in 'stateOrder' for each factor column
+    ## map columns from character to factor, obeying levels
+}
+@ 
+\noindent An implementation is available as
+<<clinicalImport-impl>>=
+importAsFactors <- CGBTutorial:::.import_as_factors
+clinical <- importAsFactors(clinical, features)
+@ 
+\noindent with a preliminary sanity check
+<<clinicalImport-impl-sanity>>=
+stopifnot(class(clinical[,"Gender_nature2012"]) == "factor")
+table(clinical[,"Gender_nature2012"], useNA="always")
+@ 
+
+As another \textbf{advanced exercise}, implement the following
+function to coordinate the clinical data matrix and annotations into a
+single object.
+<<clinicalImport-DataFrame>>=
+clinicalImportAsDataFrame <- 
+    function(fromDir, featureFile, matrixFile)
+{
+    ## input featureFile, matrixFile
+    ## create IRanges::DataFrame from matrixFile
+    ## create DataFrame from featureFile -- 1 column and several
+    ##   rows for each feature
+    ## add mcols() to DataFrame
+}
+@ 
+\noindent Use the \Rclass{DataFrame} class from \Biocpkg{IRanges} to
+create a \Rclass{data.frame}-like object that contains the data matrix
+and has \emph{another} \Rclass{data.frame} like object on the columns
+that contains the feature information. What are the advantages of this
+complicaetd kind of data structure?
+
+\subsection{Expression data}
+
+The microarray expression data follow a similar pattern -- a JSON file
+describing the data\ldots
+<<expt-JSON>>=
+str(fromJSON(file="AgilentG4502A_07_3.json"))
+@ 
+\noindent\ldots and tab-delimited expression values. We use
+\Rcode{check.names=FALSE} to accurately import the sample names, even
+though this makes it difficult to work with the data at other points
+\R. Missing values in this file are indicated by the string
+\texttt{NA}.
+<<expression, cache=TRUE>>=
+expression <- read.delim("AgilentG4502A_07_3", header=TRUE, sep="\t",
+    row.names=1, na.strings="NA", stringsAsFactors=FALSE,
+    check.names=FALSE)
+class(expression)
+dim(expression)
+expression[1:5, 1:5]
+@ 
+\noindent The expression values are imported as a \Rclass{data.frame},
+but once the row and column names are removed the remaining values are
+supposed to be numeric (we check this first) and then coerce the data
+to a matrix.
+<<expression-as-matrix>>=
+stopifnot(all(sapply(expression, class) == "numeric"))
+expression <- as.matrix(expression)
+@ 
+
+\subsection{Coordinating clinical and expression data}
+
+Clinical and expression data are tightly coupled; we would not wish to
+mix up the clinical variables and their corresponding expression. We
+reduce the chances of doing this by using the \Rclass{ExpressionSet}
+class from the \Bioconductor{} package \Biocpkg{Biobase}. We start by
+coordinating the column names of the expression data with the
+(relevant) row names of the clinical data, and then create an
+\Rclass{ExpressionSet}.
+<<ExpressionSet>>=
+library(Biobase)
+expressionClinical <- clinical[match(colnames(expression), rownames(clinical)),]
+agilent <- ExpressionSet(expression, AnnotatedDataFrame(expressionClinical))
+@ 
+\noindent The \Rclass{ExpressionSet} class offers a number of
+advantages, e.g., convenient display, coordinated subsetting of
+clinicial and expression data, and interoperability with the main
+microarray analysis work flows in \Bioconductor.
+<<ExpressionSet-advantages>>=t
+agilent
+table(agilent$Gender_nature2012, useNA="always")
+agilent[, agilent$Gender_nature2012 %in% "FEMALE"]
+@ 
+
+\subsection{Recapitulating the CGB PAM50 survival analysis}
+
+For illustration, we'll generate the Kaplan-Meirer survival curves for
+the PAM50 gene set. The genes in this set come from manually parsing
+the TCGA figure; a simple text description of this set is not in the
+original paper \cite{pmid19204204}.
+<<pam50geneset>>=
+pam50genes <- c("UBE2T", "BIRC5", "NUF2", "CDC6", "CCNB1", "TYMS", "MYBL2",
+    "CEP55", "MELK", "NDC80", "RRM2", "UBE2C", "CENPF", "PTTG1", "EXO1",
+    "ORC6L", "ANLN", "CCNE1", "CDC20", "MKI67", "KIF2C", "ACTR3B", "MYC",
+    "EGFR", "KRT5", "PHGDH", "CDH3", "MIA", "KRT17", "FOXC1", "SFRP1", "KRT14",
+    "ESR1", "SLC39A6", "BAG1", "MAPT", "PGR", "CXXC5", "MLPH", "BCL2", "MDM2",
+    "NAT1", "FOXA1", "BLVRA", "MMP11", "GPR160", "FGFR4", "GRB7", "TMEM45B",
+    "ERBB2")
+@ 
+We start by restricting our \Rclass{ExpressionSet} to the PAM50 gene
+set; there are 6 males and two individuals with unspecified gender.
+<<pam50>>=
+pam50 <- agilent[match(pam50genes, rownames(agilent)),]
+dim(pam50)
+
+@ 
+\noindent Samples are grouped by PAM50 stratum
+<<heatmap-sample-order>>=
+lvls <- pam50$PAM50_mRNA_nature2012
+o_samples <- order(lvls)
+o_samples <- rev(o_samples[!is.na(lvls[o_samples])])
+@ 
+\noindent A heatmap with is shown in Figure~\ref{fig:pam50heatmap},
+using color-blind friendly
+colors\footnote{\url{http://colorbrewer2.org/}} and a `divergent'
+color scheme as a side bar.
+<<heatmap>>=
+library(RColorBrewer)
+pal_rows <- brewer.pal(length(levels(lvls)), "Dark2")
+pal_heatmap <- rev(brewer.pal(11, "RdBu"))
+pdf(file.path(figwd, "pam50heatmap.pdf"))
+heatmap(t(exprs(pam50)[,o_samples]), col=pal_heatmap, 
+    Rowv=NA, Colv=NA, scale="column", 
+    RowSideColors=pal_rows[lvls[o_samples]], labRow=character(),
+    margin=c(5, 10))
+legend("topright", legend=levels(lvls), fill=pal_rows, cex=.9, box.lty=0)
+invisible(dev.off())
+@ 
+\begin{figure}
+  \centering
+  \includegraphics[width=.8\textwidth, height=!]{pam50heatmap}
+  \label{fig:pam50heatmap}
+  \caption{Heatmap of TCGA BRCA AgilentG4502A samples, for 48 of 50
+    genes in the PAM subset. Genes are hierarchically clustered;
+    samples are grouped by stratum.}
+\end{figure}
+
+Kaplan-Meier curves are fit using the \CRANpkg{survival} package from
+CRAN. This analysis involves purely phenotypic data, the
+stratification and survival data. Some detective work is needed to
+determine the columns used on the CGB web site; after clicking the
+'KM' button in the browser, the `advanced' button suggests the plot is
+of columns \texttt{\_EVENT} and \texttt{\_EVENT overall
+  survival}. Which clincial data columns do these correspond to?
+<<grep>>=
+grep("_EVENT", names(clinical), fixed=TRUE, value=TRUE)
+@ 
+\noindent From the plot, the expected number of each substratum is
+<<substratum-expected>>=
+c(`Luminal A`=223, `Luminal B`=119, `HER2-enriched`=48, `Basal-like`=93,
+  `Normal-like`=8)
+@ 
+\noindent In the clinical data as a whole and in the \Rcode{agilent}
+subset identified above, the data appear to be consistent with the
+entire clinical data set
+<<possible-subsets>>=
+with(clinical, {
+    c_idx <<- !is.na(X_EVENT) & !is.na(X_TIME_TO_EVENT) &
+        !is.na(PAM50_mRNA_nature2012)
+    table(PAM50_mRNA_nature2012[c_idx], useNA="always")
+})
+with(pData(agilent), {
+    p_idx <<- !is.na(X_EVENT) & !is.na(X_TIME_TO_EVENT) &
+        !is.na(PAM50_mRNA_nature2012)
+    table(PAM50_mRNA_nature2012[p_idx], useNA="always")
+})
+@ 
+\noindent The data present in the clincial data as a whole but absent
+in the microarray subset would appear to be from a duplicate sample,
+apparently removed from the microarray.
+<<duplicate-remove>>=
+c_names <- rownames(clinical)[c_idx]
+c_names[!c_names %in% colnames(agilent)]
+@ 
+\noindent We analyze the PAM50 data.
+
+Survival analysis in \R{} is done using the \CRANpkg{survival} CRAN
+package; the details of formulating the model are not described here.
+<<survfit>>=
+library(survival)
+formula <- Surv(X_TIME_TO_EVENT, event=X_EVENT) ~ PAM50_mRNA_nature2012
+fit <- survfit(formula, pData(agilent))
+@ 
+\noindent A visualization is in Figure~\ref{fig:pam50survfit}.
+<<pam50-stratification>>=
+lvls <- levels(agilent$PAM50_mRNA_nature2012)
+pal <- brewer.pal(length(lvls), "Dark2")
+pdf(file.path(figwd, "pam50-survival.pdf"), width=8, height=6)
+plot(fit, col=pal, lty=1, lwd=2, xlab="X_TIME_TO_EVENT", ylab="Pr(X_EVENT)",
+     main="AgilentG4502A subset")
+legend("topright", legend=lvls, col=pal, lty=1, lwd=2, pch="+", box.lty=0,
+       ncol=2)
+invisible(dev.off())
+@ 
+\begin{figure}
+  \centering
+  \includegraphics[width=.8\textwidth]{pam50-survival}
+  \label{fig:pam50survfit}
+  \caption{Kaplan-Meier survivorship curves for the AgilentG4502A
+    subset of TCGA BRCA data}
+\end{figure}
+
+\bibliography{CGBTutorial}
+
+\end{document}

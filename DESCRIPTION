@@ -1,0 +1,13 @@
+Package: CGBTutorial
+Type: Package
+Title: Tutorial: Cancer Genomics Browser data in R / Bioconductor
+Version: 0.0.1
+Author: Martin Morgan
+Maintainer: Martin Morgan <mtmorgan@fhcrc.org>
+Description: This tutorial illustrates how files obtained from the
+    Cancer Genomics Browser (CGB) can be loaded into appropriate R /
+    Bioconductor data structures, and how data can be handled to
+    arrive at results comparable to those in CGB tutorials.
+License: Artistic-2.0
+Suggests: BiocStyle, knitr, rjson, Biobase, survival, RColorBrewer
+VignetteBuilder: knitr
