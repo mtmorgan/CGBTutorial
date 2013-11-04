@@ -80,7 +80,7 @@ opts_knit$set(root.dir=getwd())
 \item[BRCA\_clinicalMatrix] Sample $\times$ clinical feature matrix
 \item[BRCA\_clinicalFeature] Description of clinical features.
 \item[collapsed\_hugo\_symbols\_aliases\_only\_hg18.probeMap] HUGO gene
-  symbol start and end coordinates (0-based, hg18)
+  symbol start and end coordinates (genome build?)
 \item[sampleMap]
 \item[*.json] Descriptions of the corresponding file.
 \item[md5.txt] A file of `check-sums' to validate that the data have

@@ -10,5 +10,5 @@ Description: This tutorial illustrates how files obtained from the
     arrive at results comparable to those in CGB tutorials.
 License: Artistic-2.0
 Suggests: BiocStyle, knitr, rjson, Biobase, survival, RColorBrewer,
-    GenomicRanges
+    GenomicRanges, ggbio
 VignetteBuilder: knitr
