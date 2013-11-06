@@ -29,3 +29,17 @@
     data[,names(lvls)] <- Map(factor, data[,names(lvls)], levels=lvls)
     data
 }
+
+.import_as_AnnotatedDataFrame <-
+    function(clinical, features,
+       featureKeys=c("shortTitle", "longTitle", "valueType"))
+{
+    ## FIXME: DataFrame
+    fid <- unique(features$Feature)
+    m <- matrix(character(), length(fid), length(featureKeys),
+        dimnames=list(fid, featureKeys))
+    features1 <- as.matrix(features[features$Key %in% featureKeys,])
+    m[features1[,c("Feature", "Key")]] <- features1[,"Value"]
+    metadata <- as.data.frame(m)[colnames(clinical), , drop=FALSE]
+    AnnotatedDataFrame(clinical, metadata)
+}

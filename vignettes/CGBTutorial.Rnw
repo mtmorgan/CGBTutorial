@@ -177,12 +177,12 @@ importAsFactors <-
 }
 @ 
 \noindent An implementation is available as
-<<clinicalImport-impl>>=
+<<importAsFactors-impl>>=
 importAsFactors <- CGBTutorial:::.import_as_factors
 clinical <- importAsFactors(clinical, features)
 @ 
 \noindent with a preliminary sanity check
-<<clinicalImport-impl-sanity>>=
+<<clinicalImportAsFactors-impl-sanity>>=
 stopifnot(class(clinical[,"Gender_nature2012"]) == "factor")
 table(clinical[,"Gender_nature2012"], useNA="always")
 @ 
@@ -190,22 +190,24 @@ table(clinical[,"Gender_nature2012"], useNA="always")
 As another \textbf{advanced exercise}, implement the following
 function to coordinate the clinical data matrix and annotations into a
 single object.
-<<clinicalImport-DataFrame>>=
-clinicalImportAsDataFrame <- 
-    function(fromDir, featureFile, matrixFile)
+<<importAsAnnotatedDataFrame>>=
+importAsAnnotatedDataFrame <-
+    function(clinical, features,
+        featureKeys=c("shortTitle", "longTitle", "valueType"))
 {
-    ## input featureFile, matrixFile
-    ## create IRanges::DataFrame from matrixFile
-    ## create DataFrame from featureFile -- 1 column and several
-    ##   rows for each feature
-    ## add mcols() to DataFrame
+    ## transform 'features' to Feature x featureKeys matrix
+    ## create Biobase::AnnotatedDataFrame with
+    ## - clinical as 'pData'
+    ## - feature x featureColumn matrix as 'metadata'
 }
 @ 
-\noindent Use the \Rclass{DataFrame} class from \Biocpkg{IRanges} to
-create a \Rclass{data.frame}-like object that contains the data matrix
-and has \emph{another} \Rclass{data.frame} like object on the columns
-that contains the feature information. What are the advantages of this
-complicaetd kind of data structure?
+\noindent An implementation is available as
+<<importAsAnnotatedDataFrame-impl>>=
+importAsAnnotatedDataFrame <- CGBTutorial:::.import_as_AnnotatedDataFrame
+clinical <- importAsAnnotatedDataFrame(clinical, features)
+@
+\noindent What are the advantages of this complicated kind of data
+structure?
 
 \subsection{Expression data}
 
@@ -247,8 +249,8 @@ coordinating the column names of the expression data with the
 \Rclass{ExpressionSet}.
 <<ExpressionSet>>=
 library(Biobase)
-expressionClinical <- clinical[match(colnames(expression), rownames(clinical)),]
-agilent <- ExpressionSet(expression, AnnotatedDataFrame(expressionClinical))
+stopifnot(all(colnames(expression) %in% rownames(clinical)))
+agilent <- ExpressionSet(expression, clinical[colnames(expression), ])
 @ 
 \noindent The \Rclass{ExpressionSet} class offers a number of
 advantages, e.g., convenient display, coordinated subsetting of
@@ -323,7 +325,7 @@ determine the columns used on the CGB web site; after clicking the
 of columns \texttt{\_EVENT} and \texttt{\_EVENT overall
   survival}. Which clincial data columns do these correspond to?
 <<grep>>=
-grep("_EVENT", names(clinical), fixed=TRUE, value=TRUE)
+grep("_EVENT", colnames(clinical), fixed=TRUE, value=TRUE)
 @ 
 \noindent From the plot, the expected number of each substratum is
 <<substratum-expected>>=
@@ -334,7 +336,7 @@ c(`Luminal A`=223, `Luminal B`=119, `HER2-enriched`=48, `Basal-like`=93,
 subset identified above, the data appear to be consistent with the
 entire clinical data set
 <<possible-subsets>>=
-with(clinical, {
+with(pData(clinical), {
     c_idx <<- !is.na(X_EVENT) & !is.na(X_TIME_TO_EVENT) &
         !is.na(PAM50_mRNA_nature2012)
     table(PAM50_mRNA_nature2012[c_idx], useNA="always")
