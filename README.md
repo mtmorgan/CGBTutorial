@@ -18,14 +18,14 @@ on 6 November, 2013.
 1. Export this repository github.
 2. Install the package dependencies
 
-    source("http://bioconductor.org/biocLite.R")
-    biocLite("Biobase")
+        source("http://bioconductor.org/biocLite.R")
+        biocLite("Biobase")
     
 3. Download `TCGA_BRCA_G4502A_07_3-2013-10-29.tgz` and
    `TCGA_BRCA_GSNP6noCNV-2013-10-29.tgz` from the CGB, and place this
    in the `CGBTutorial/inst/bigdata` directory
 4. Build and install the package
 
-       R CMD build CGBTutorial
-       R CMD INSTALL CGBTutorial_0.0.2.tar.gz
+        R CMD build CGBTutorial
+        R CMD INSTALL CGBTutorial_0.0.2.tar.gz
        
